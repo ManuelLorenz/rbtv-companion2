@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111318"><title>RBTV Companion</title>
+<style>
+:root{--bg:#111318;--panel:#1b1e25;--panel2:#242832;--text:#f4f5f7;--muted:#a6adba;--orange:#f07832;--line:#303541}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,-apple-system,Segoe UI,sans-serif;padding-bottom:86px}
+header{padding:24px 18px 16px;background:linear-gradient(145deg,#252a34,#15171d);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:12px}.bean{width:42px;height:42px;border-radius:13px;background:var(--orange);display:grid;place-items:center;font-weight:900;color:#15171d;font-size:17px}
+h1{font-size:21px;margin:0}header p{margin:4px 0 0;color:var(--muted);font-size:12px;letter-spacing:.08em}
+main{padding:16px;max-width:760px;margin:auto}.topline{display:flex;justify-content:space-between;align-items:center;margin:8px 0 14px}.topline h2{font-size:20px;margin:0}.refresh{border:1px solid var(--line);background:var(--panel);color:var(--text);padding:9px 12px;border-radius:12px}
+.tabs{display:flex;gap:8px;margin:16px 0;overflow:auto}.tab{white-space:nowrap;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);padding:10px 15px}.tab.active{background:var(--orange);color:#17191e;border-color:var(--orange);font-weight:700}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;margin:10px 0}.eyebrow{font-size:11px;color:var(--orange);font-weight:800;text-transform:uppercase;letter-spacing:.08em}.card h3{font-size:16px;line-height:1.35;margin:6px 0}.meta{font-size:12px;color:var(--muted)}.card a{color:inherit;text-decoration:none}.empty,.status{color:var(--muted);text-align:center;padding:26px 12px}.error{color:#ffad8b}.thumb{width:100%;max-height:180px;object-fit:cover;border-radius:11px;margin-bottom:10px;background:var(--panel2)}
+.bottom{position:fixed;bottom:0;left:0;right:0;background:#171a20ee;backdrop-filter:blur(12px);border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:10px 4px calc(10px + env(safe-area-inset-bottom));z-index:5}.bottom button{border:0;background:none;color:var(--muted);font-size:11px;display:grid;gap:4px;justify-items:center}.bottom button span{font-size:19px}.bottom button.active{color:var(--orange)}
+.day{font-size:13px;font-weight:800;color:#fff;margin:18px 2px 6px}.time{color:var(--orange);font-weight:800;margin-right:7px}
+</style></head>
+<body>
+<header><div class="brand"><div class="bean">RB</div><div><h1>RBTV Companion</h1><p>RBTV · LIVE-DATEN & AUTOMATISCHE AKTUALISIERUNG</p></div></div></header>
+<main>
+ <div class="topline"><h2 id="heading">Moin, Beans! ☕</h2><button class="refresh" onclick="loadAll()">↻ Aktualisieren</button></div>
+ <div class="tabs"><button class="tab active" data-tab="plan">Uploadplan</button><button class="tab" data-tab="videos">Aktuelle Uploads</button><button class="tab" data-tab="news">News</button></div>
+ <div id="status" class="status">Lade aktuelle RBTV-Inhalte …</div><section id="content"></section>
+</main>
+<nav class="bottom"><button class="active" data-tab="plan"><span>▦</span>Plan</button><button data-tab="videos"><span>▶</span>Uploads</button><button data-tab="news"><span>▤</span>News</button></nav>
+<script>
+let active='plan', cache={plan:null,videos:null,news:null}, pending={}, seq=0, lastUpdated=0;
+const labels={plan:'Uploadplan',videos:'Aktuelle Uploads',news:'RBTV News'};
+function api(path){return new Promise((resolve,reject)=>{const id=++seq;pending[id]={resolve,reject};if(window.RBTV){RBTV.getJson(path,String(id));}else{fetch('https://api.rocketbeans.tv/v1'+path).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(resolve).catch(reject);}})}
+window.apiResult=(id,raw,error)=>{const p=pending[id];if(!p)return;delete pending[id];if(error){p.reject(new Error(error));return;}try{p.resolve(JSON.parse(raw));}catch(e){p.reject(e);}};
+window.cachedSnapshot=(raw)=>{try{const snap=JSON.parse(raw);['plan','videos','news'].forEach(k=>{if(snap[k])cache[k]=snap[k];});lastUpdated=snap.updatedAt||0;if(lastUpdated){document.getElementById('status').textContent='Gespeicherter Stand · '+fmtClock(lastUpdated);document.getElementById('status').className='status';render();}}catch(e){}};
+function fmtClock(v){return new Date(v).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
+function itemsFor(data,kind){
+ if(!data)return [];
+ if(kind==='videos')return Array.isArray(data.episodes)?data.episodes:unwrap(data);
+ if(kind==='plan'){
+   const days=Array.isArray(data)?data:(data.days||data.schedule||data.data||[]);
+   return days.flatMap(day=>(day.elements||day.items||[]).map(item=>({...item,_day:day.date})));
+ }
+ return unwrap(data);
+}
+function unwrap(o){if(Array.isArray(o))return o;for(const k of ['data','items','results','posts','entries','blogPosts'])if(Array.isArray(o?.[k]))return o[k];return [];}
+function pick(o,keys){for(const k of keys){const v=o?.[k];if(v!==undefined&&v!==null&&v!=='')return v;}return '';}
+function imageUrl(v){
+ if(!v)return '';
+ if(typeof v==='string')return v;
+ if(Array.isArray(v))return imageUrl(v[0]);
+ if(typeof v==='object')return pick(v,['url','src','uri','original','large','medium','small'])||'';
+ return '';
+}
+function itemDate(o,kind){return kind==='plan'?pick(o,['uploadDate','timeStart','date','_day']):kind==='videos'?pick(o,['distributionPublishingDate','publishDate','date']):pick(o,['publishDate','publishedAt','date']);}
+function titleOf(o){return pick(o,['title','name','headline'])||'RBTV-Beitrag';}
+function urlOf(o,kind){
+ const links=o?.links;
+ if(Array.isArray(links)&&links.length){const u=pick(links[0],['url','href','link']);if(u)return u;}
+ const id=pick(o,['id','episodeId']);
+ if(kind==='news'&&id)return 'https://rocketbeans.tv/blog/'+id;
+ if(kind==='videos'&&id)return 'https://rocketbeans.tv/mediathek/episode/'+id;
+ return 'https://rocketbeans.tv/mediathek/uploadplan';
+}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function dateText(v){if(!v)return '';let d=typeof v==='number'?new Date(v<1e12?v*1000:v):new Date(v);return isNaN(d)?String(v):d.toLocaleString('de-DE',{weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
+function renderCards(items,kind){
+ if(!items.length)return '<div class="empty">Keine Einträge gefunden. Ziehe zum Aktualisieren nach unten oder nutze ↻.</div>';
+ return items.map(o=>{
+  const title=titleOf(o),url=urlOf(o,kind),date=itemDate(o,kind);
+  const channel=pick(o,['showTitle','showName','channelName','channel','show','format','topic']);
+  const image=imageUrl(kind==='plan'?pick(o,['showThumbnail','episodeImages','episodeImage']):kind==='news'?pick(o,['thumbImage','titleImage','promoImage']):pick(o,['thumbnail','episodeImage']));
+  const stamp=date?dateText(date):'';
+  const time=kind==='plan'&&date?new Date(date).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}):'';
+  const badge=kind==='plan'?'Geplanter Upload':kind==='news'?'Offizielle News':'Neuer Mediathek-Upload';
+  return `<article class="card">${image?`<img class="thumb" src="${esc(image)}" loading="lazy" onerror="this.style.display='none'">`:''}<div class="eyebrow">${badge}</div><h3><a href="${esc(url)}" target="_blank">${esc(title)}</a></h3><div class="meta">${kind==='plan'&&time?`<span class="time">${esc(time)} Uhr</span>`:''}${esc(kind==='plan'?'':stamp)}${channel?' · '+esc(channel):''}</div></article>`;
+ }).join('');
+}
+async function loadAll(){
+ document.getElementById('status').textContent='Aktualisiere direkt bei Rocket Beans …';
+ const now=Math.floor(Date.now()/1000);
+ const paths={plan:'/schedule/publish?from='+now,videos:'/media/episode/preview/newest?limit=50&order=DESC',news:'/blog/preview/all?limit=50'};
+ const results=await Promise.allSettled(Object.entries(paths).map(([k,p])=>api(p).then(data=>({k,data}))));
+ let success=0;
+ results.forEach(r=>{if(r.status==='fulfilled'){cache[r.value.k]=r.value.data;success++;}});
+ if(success){lastUpdated=Date.now();document.getElementById('status').textContent='Live aktualisiert · '+new Date(lastUpdated).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});document.getElementById('status').className='status';}
+ else if(lastUpdated){document.getElementById('status').textContent='RBTV gerade nicht erreichbar · gespeicherter Stand '+fmtClock(lastUpdated);document.getElementById('status').className='status error';}
+ else {document.getElementById('status').textContent='RBTV-API gerade nicht erreichbar. Bitte später erneut versuchen.';document.getElementById('status').className='status error';}
+ render();
+}
+function render(){
+ document.getElementById('heading').textContent=active==='plan'?'Moin, Beans! ☕':labels[active];
+ document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===active));
+ document.getElementById('content').innerHTML=renderCards(itemsFor(cache[active],active),active);
+}
+document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{active=b.dataset.tab;render()}));
+if(window.RBTV)RBTV.getCachedSnapshot();
+loadAll();
+setInterval(loadAll,10*60*1000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadAll();});
+</script></body></html>

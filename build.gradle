@@ -1,0 +1,17 @@
+plugins {
+    id 'com.android.application'
+}
+android {
+    namespace 'tv.rocketbeans.companion'
+    compileSdk 37
+    defaultConfig {
+        applicationId 'tv.rocketbeans.companion'
+        minSdk 23
+        targetSdk 37
+        versionCode 1
+        versionName '1.0'
+    }
+}
+dependencies {
+    implementation 'androidx.work:work-runtime-ktx:2.10.0'
+}
